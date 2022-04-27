@@ -6,6 +6,7 @@ import {
 import { useState, useEffect } from 'react'
 import { Grid } from './components/grid/Grid'
 import { Keyboard } from './components/keyboard/Keyboard'
+import { ActionButton } from './components/buttons/ActionButton'
 import { InfoModal } from './components/modals/InfoModal'
 import { StatsModal } from './components/modals/StatsModal'
 import { SettingsModal } from './components/modals/SettingsModal'
@@ -44,6 +45,8 @@ import { default as GraphemeSplitter } from 'grapheme-splitter'
 import './App.css'
 import { AlertContainer } from './components/alerts/AlertContainer'
 import { useAlert } from './context/AlertContext'
+import { sequence } from '0xsequence'
+import { ETHAuth } from '@0xsequence/ethauth'
 
 function App() {
   const prefersDarkMode = window.matchMedia(
@@ -53,6 +56,8 @@ function App() {
   const { showError: showErrorAlert, showSuccess: showSuccessAlert } =
     useAlert()
   const [currentGuess, setCurrentGuess] = useState('')
+  const [isWalletOpen, setIsWalletOpen] = useState(false)
+  const [title, setTitle] = useState(GAME_TITLE)
   const [isGameWon, setIsGameWon] = useState(false)
   const [isInfoModalOpen, setIsInfoModalOpen] = useState(false)
   const [isStatsModalOpen, setIsStatsModalOpen] = useState(false)
@@ -72,6 +77,7 @@ function App() {
   const [isRevealing, setIsRevealing] = useState(false)
   const [guesses, setGuesses] = useState<string[]>(() => {
     const loaded = loadGameStateFromLocalStorage()
+    console.log('Satraj', solution)
     if (loaded?.solution !== solution) {
       return []
     }
@@ -95,6 +101,61 @@ function App() {
       ? localStorage.getItem('gameMode') === 'hard'
       : false
   )
+
+  // Sequence Wallet
+  const wallet = new sequence.Wallet()
+
+  const connect = async (
+    authorize: boolean = false,
+    withSettings: boolean = false
+  ) => {
+    const connectDetails = await wallet.connect({
+      app: 'Cryptible',
+      authorize,
+      keepWalletOpened: true,
+      ...(withSettings && {
+        networkId: 'polygon',
+        settings: {
+          theme: 'indigoDark',
+          bannerUrl: `${window.location.origin}${'cryptibleBannerUrl'}`,
+          includedPaymentProviders: ['moonpay'],
+          defaultFundingCurrency: 'matic',
+        },
+      }),
+    })
+
+    console.log('connectDetails', { connectDetails })
+    setIsWalletOpen(wallet.isConnected())
+    setTitle(
+      connectDetails.session?.accountAddress
+        ? connectDetails.session?.accountAddress.substring(0, 4) +
+            '...' +
+            connectDetails.session?.accountAddress.substr(-4)
+        : GAME_TITLE
+    )
+
+    if (authorize) {
+      const ethAuth = new ETHAuth()
+
+      if (connectDetails.proof) {
+        const decodedProof = await ethAuth.decodeProof(
+          connectDetails.proof.proofString,
+          true
+        )
+
+        console.log({ decodedProof })
+
+        const isValid = await wallet.utils.isValidTypedDataSignature(
+          await wallet.getAddress(),
+          connectDetails.proof.typedData,
+          decodedProof.signature,
+          await wallet.getAuthChainId()
+        )
+        console.log('isValid?', isValid)
+        if (!isValid) throw new Error('sig invalid')
+      }
+    }
+  }
 
   useEffect(() => {
     // if no game state on load,
@@ -182,6 +243,17 @@ function App() {
     )
   }
 
+  const onClick = (value: string) => {
+    if (wallet.isConnected()) {
+      wallet.disconnect()
+      wallet.closeWallet()
+      setIsWalletOpen(false)
+      setTitle(GAME_TITLE)
+    } else {
+      connect()
+    }
+  }
+
   const onEnter = () => {
     if (isGameWon || isGameLost) {
       return
@@ -246,23 +318,33 @@ function App() {
   }
 
   return (
-    <div className="pt-2 pb-8 max-w-7xl mx-auto sm:px-6 lg:px-8">
-      <div className="flex w-80 mx-auto items-center mb-8 mt-20">
-        <h1 className="text-xl ml-2.5 grow font-bold dark:text-white">
-          {GAME_TITLE}
+    <div className="pt-2 pb-8 max-w-3xl mx-auto sm:px-6 lg:px-8">
+      <div className="flex mx-auto items-center mb-12 mt-8 ml-2 mr-2">
+        <div className="flex mx-auto items-center">
+          <InformationCircleIcon
+            className="h-6 w-6 mr-3 cursor-pointer dark:stroke-white"
+            onClick={() => setIsInfoModalOpen(true)}
+          />
+          <ChartBarIcon
+            className="h-6 w-6 mr-3 cursor-pointer dark:stroke-whixte"
+            onClick={() => setIsStatsModalOpen(true)}
+          />
+          <CogIcon
+            className="h-6 w-6 mr-3 cursor-pointer dark:stroke-white"
+            onClick={() => setIsSettingsModalOpen(true)}
+          />
+        </div>
+        <h1 className="text-xl text-center grow font-bold dark:text-white">
+          {title}
         </h1>
-        <InformationCircleIcon
-          className="h-6 w-6 mr-2 cursor-pointer dark:stroke-white"
-          onClick={() => setIsInfoModalOpen(true)}
-        />
-        <ChartBarIcon
-          className="h-6 w-6 mr-3 cursor-pointer dark:stroke-white"
-          onClick={() => setIsStatsModalOpen(true)}
-        />
-        <CogIcon
-          className="h-6 w-6 mr-3 cursor-pointer dark:stroke-white"
-          onClick={() => setIsSettingsModalOpen(true)}
-        />
+        <ActionButton
+          width={120}
+          value="Connect"
+          onClick={onClick}
+          isConnected={isWalletOpen}
+        >
+          {isWalletOpen ? 'Sign out' : 'Connect Wallet'}
+        </ActionButton>
       </div>
       <Grid
         guesses={guesses}
